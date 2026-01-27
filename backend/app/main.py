@@ -17,15 +17,13 @@ app.add_middleware(
 )
 
 # Static Files for Images
-# We assume data is stored in /data/projects (relative to where we run)
-# For local dev, let's look for a "data" folder in the project root
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DATA_DIR = os.path.join(BASE_DIR, "data")
-os.makedirs(DATA_DIR, exist_ok=True)
+# In Docker, we map volume to /app/data
+STATIC_ROOT = os.path.join(os.getcwd(), "data")
+os.makedirs(STATIC_ROOT, exist_ok=True)
 
 # Mount /static to serve images
 # Access: http://localhost:8000/static/projects/{id}/images/img.jpg
-app.mount("/static", StaticFiles(directory=DATA_DIR), name="static")
+app.mount("/static", StaticFiles(directory=STATIC_ROOT), name="static")
 
 app.include_router(routes.router, prefix="/api")
 

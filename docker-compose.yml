@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      network: host
+    container_name: pdf_epub_backend
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      network: host
+    container_name: pdf_epub_frontend
+    ports:
+      - "9527:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

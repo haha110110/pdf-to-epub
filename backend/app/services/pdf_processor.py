@@ -57,11 +57,16 @@ class PDFProcessor:
             if image.mode in ('RGBA', 'P'):
                 image = image.convert('RGB')
             
-            save_path = os.path.join(self.images_dir, img_name)
+            # Force extension to .jpg since we convert to JPEG
+            # This ensures EPUB readers don't get confused by PNG extension with JPEG content
+            base_name = os.path.splitext(img_name)[0]
+            new_filename = f"{base_name}.jpg"
+            
+            save_path = os.path.join(self.images_dir, new_filename)
             image.save(save_path, "JPEG", quality=75)
             
             # Return relative path for Markdown usage
-            return f"images/{img_name}"
+            return f"images/{new_filename}"
         except Exception as e:
             logger.warning(f"Failed to compress image {img_name}: {e}")
             return None
@@ -184,24 +189,83 @@ class PDFProcessor:
 
     def _generate_markdown(self, items):
         md_out = ""
-        for item in items:
+        
+        # We need to merge text blocks that are likely part of the same paragraph.
+        # Simple heuristic:
+        # If block ends with sentence-ending punctuation (., 。, ?, !), it's end of para.
+        # Otherwise, we merge with next block.
+        
+        buffer_text = ""
+        
+        for i, item in enumerate(items):
             if item['type'] == 'text':
                 text = item['text']
-                md_out += f"{text}\n\n"
                 
-                # Check for smart insertion references
-                refs = self._extract_refs_from_text(text)
-                for ref_key in refs:
-                    if ref_key in self.image_ref_map:
-                        data = self.image_ref_map[ref_key]
-                        if not data.get('inserted', False):
-                            md_out += f"![{data['caption']}]({data['path']})\n"
-                            md_out += f"*{data['caption']}*\n\n"
-                            data['inserted'] = True
-            
+                # Check refs in the raw segment (needed for insertion logic)
+                # But we want to insert images AFTER the paragraph ends or near the ref?
+                # The current logic inserts immediately. Let's keep immediate insertion for now, 
+                # but we need to accumulate text for the Markdown output.
+                
+                # Clean up newlines within the block itself (PDF blocks often have internal \n)
+                # Replace internal \n with nothing (for Chinese) or space (for English)?
+                # Heuristic: if char before \n is Chinese, no space. 
+                text = re.sub(r'(?<=[\u4e00-\u9fff])\n(?=[\u4e00-\u9fff])', '', text)
+                text = text.replace('\n', ' ')
+
+                # Add to buffer
+                if buffer_text:
+                    # Decide joiner: Space if English, Empty if Chinese
+                    last_char = buffer_text[-1]
+                    first_char = text[0]
+                    if self._is_cjk(last_char) and self._is_cjk(first_char):
+                        buffer_text += text
+                    else:
+                        buffer_text += " " + text
+                else:
+                    buffer_text = text
+
+                # Check if this block looks like end of paragraph
+                # 1. Ends with punctuation
+                # 2. Or next item is NOT text (e.g. image)
+                # 3. Or next text item is "far" (not implemented here, we rely on punctuation)
+                
+                is_end_of_para = False
+                if re.search(r'[。！？\.\!\?]\s*$', text):
+                    is_end_of_para = True
+                
+                # Look ahead
+                next_item = items[i+1] if i+1 < len(items) else None
+                if next_item and next_item['type'] != 'text':
+                    is_end_of_para = True
+                
+                if is_end_of_para or next_item is None:
+                    md_out += f"{buffer_text}\n\n"
+                    
+                    # Check refs in the accumulated paragraph
+                    refs = self._extract_refs_from_text(buffer_text)
+                    for ref_key in refs:
+                        if ref_key in self.image_ref_map:
+                            data = self.image_ref_map[ref_key]
+                            if not data.get('inserted', False):
+                                md_out += f"![{data['caption']}]({data['path']})\n"
+                                md_out += f"*{data['caption']}*\n\n"
+                                data['inserted'] = True
+                    
+                    buffer_text = "" # Reset buffer
+
             elif item['type'] == 'image_fallback':
-                md_out += f"![]( {item['path']} )\n\n"
+                # If we have buffer text pending, flush it first (unless we want image inside para?)
+                # Usually image breaks paragraph.
+                if buffer_text:
+                     md_out += f"{buffer_text}\n\n"
+                     buffer_text = ""
+                
+                md_out += f"![]({item['path']})\n\n"
         
+        # Flush remaining
+        if buffer_text:
+            md_out += f"{buffer_text}\n\n"
+
         # Appendix
         md_out += "\n---\n### Appendix: Unreferenced Figures\n\n"
         for key, data in self.image_ref_map.items():
@@ -210,6 +274,10 @@ class PDFProcessor:
                 md_out += f"*{data['caption']}*\n\n"
                 
         return md_out
+
+    def _is_cjk(self, char):
+        if not char: return False
+        return '\u4e00' <= char <= '\u9fff'
 
     def _normalize_ref_key(self, text):
         match = self.caption_pattern.search(text)
