@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+pymupdf
+Pillow
+python-multipart
+pypandoc
