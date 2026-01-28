@@ -1,0 +1,8 @@
+{
+    "files.exclude": {
+        "**/.agent": false
+    },
+    "search.exclude": {
+        "**/.agent": false
+    }
+}
