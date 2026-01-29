@@ -8,6 +8,14 @@ from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling_core.types.doc import ImageRefMode, DocItemLabel
 
+# Import hierarchical-pdf for reading order correction
+try:
+    from docling_hierarchical_pdf import reorder_document
+    HIERARCHICAL_PDF_AVAILABLE = True
+except ImportError:
+    HIERARCHICAL_PDF_AVAILABLE = False
+    logging.warning("docling-hierarchical-pdf not available, reading order may not be optimal")
+
 logger = logging.getLogger(__name__)
 
 class PDFProcessor:
@@ -57,7 +65,20 @@ class PDFProcessor:
 
         logger.info("PDF converted successfully. Exporting content...")
 
-        # 4. Save Images & Export Markdown
+        # 4. Fix reading order using docling-hierarchical-pdf
+        document = conv_result.document
+        if HIERARCHICAL_PDF_AVAILABLE:
+            try:
+                logger.info("Applying reading order correction using docling-hierarchical-pdf...")
+                document = reorder_document(document)
+                logger.info("Reading order corrected successfully")
+            except Exception as e:
+                logger.warning(f"Failed to apply reading order correction: {e}")
+        
+        # 5. Fix column switch label misidentification
+        self._fix_column_switch_labels(document)
+
+        # 6. Save Images & Export Markdown
         # Strategy: We first save the images manually to ensure they exist on disk.
         # Then we export markdown using REFERENCED mode so Docling generates links.
         # Note: We rely on the order/naming convention fitting what Docling expects,
@@ -85,7 +106,7 @@ class PDFProcessor:
             # No, safer to just save them. 
         
         # Export Markdown
-        md_content = conv_result.document.export_to_markdown(
+        md_content = document.export_to_markdown(
             image_mode=ImageRefMode.REFERENCED
         )
         
@@ -114,6 +135,81 @@ class PDFProcessor:
         logger.info(f"Markdown content saved to {md_path}")
         
         return str(md_path)
+    
+    def _fix_column_switch_labels(self, document) -> None:
+        """
+        修正分栏切换点的样式误判。
+        
+        策略：
+        1. 遍历文档的所有文本项
+        2. 检测水平位置突变（x坐标变化 > 阈值）→ 分栏切换
+        3. 对于切换点，检查：
+           - 如果被标记为TITLE/SECTION_HEADER，但前后文是PARAGRAPH
+           - 且文本长度 > 50（标题通常较短）
+           - 则降级为PARAGRAPH
+        """
+        text_items = []
+        
+        # 收集所有文本项及其位置信息
+        for item in document.body:
+            if hasattr(item, 'text') and hasattr(item, 'prov') and item.prov:
+                # 获取第一个provenance的bbox
+                first_prov = item.prov[0]
+                if first_prov.bbox:
+                    text_items.append({
+                        'item': item,
+                        'bbox': first_prov.bbox,
+                        'page_no': first_prov.page_no,
+                        'label': item.label,
+                        'text_length': len(item.text)
+                    })
+        
+        # 检测并修正分栏切换点
+        fixes_count = 0
+        for i in range(1, len(text_items)):
+            prev_item = text_items[i-1]
+            curr_item = text_items[i]
+            
+            # 检查是否在同一页
+            if prev_item['page_no'] != curr_item['page_no']:
+                continue
+            
+            # 计算水平位置变化（left坐标）
+            x_diff = abs(curr_item['bbox'].l - prev_item['bbox'].l)
+            
+            # 阈值：如果x坐标变化 > 100（经验值），认为是分栏切换
+            COLUMN_SWITCH_THRESHOLD = 100
+            
+            if x_diff > COLUMN_SWITCH_THRESHOLD:
+                # 检测到分栏切换
+                logger.debug(f"检测到分栏切换: x_diff={x_diff:.2f}, "
+                            f"当前标签={curr_item['label']}, "
+                            f"文本长度={curr_item['text_length']}, "
+                            f"文本预览='{curr_item['item'].text[:30]}...'")
+                
+                # 如果当前项被标记为标题类，但看起来像段落
+                if curr_item['label'] in [DocItemLabel.TITLE, DocItemLabel.SECTION_HEADER]:
+                    text = curr_item['item'].text.strip()
+                    
+                    # 验证条件（满足任一即判定为误判的标题）：
+                    # 条件1：文本较长（标题通常 < 50字符）且前一项是段落
+                    # 条件2：文本以句号、逗号等标点结尾（标题通常不以这些符号结尾）
+                    is_too_long = (curr_item['text_length'] > 50 and 
+                                  prev_item['label'] == DocItemLabel.PARAGRAPH)
+                    is_ending_with_punctuation = text.endswith(('。', '.', '，', ',', '；', ';'))
+                    
+                    if is_too_long or is_ending_with_punctuation:
+                        # 修正标签
+                        reason = "文本过长" if is_too_long else "以标点符号结尾"
+                        logger.info(f"修正分栏切换点标签 ({reason}): '{text[:30]}...' "
+                                   f"从 {curr_item['label']} 改为 PARAGRAPH")
+                        curr_item['item'].label = DocItemLabel.PARAGRAPH
+                        fixes_count += 1
+        
+        if fixes_count > 0:
+            logger.info(f"共修正了 {fixes_count} 个分栏切换点的样式误判")
+        else:
+            logger.debug("未检测到需要修正的分栏切换点")
     
     def _remove_page_numbers(self, markdown_text: str) -> str:
         """

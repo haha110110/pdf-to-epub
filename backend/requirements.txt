@@ -1,6 +1,7 @@
 fastapi
 uvicorn
 docling
+docling-hierarchical-pdf
 
 pypdfium2
 Pillow
