@@ -84,13 +84,15 @@ class PDFProcessor:
             # Let's rely on the fact that `docling` is smart enough if we don't mess with it?
             # No, safer to just save them. 
         
-        # Export Markdown with optional page number filtering
+        # Export Markdown
+        md_content = conv_result.document.export_to_markdown(
+            image_mode=ImageRefMode.REFERENCED
+        )
+        
+        # Apply page number filtering if enabled
         if self.filter_page_numbers:
-            md_content = self._export_filtered_markdown(conv_result.document)
-        else:
-            md_content = conv_result.document.export_to_markdown(
-                image_mode=ImageRefMode.REFERENCED
-            )
+            md_content = self._remove_page_numbers(md_content)
+            logger.info("Applied page number filtering to markdown content")
         
         # Docling output usually looks like `![Image](image_1.png)` or similar defaults.
         # We might need to post-process the markdown if the paths don't match our `images/` folder.
@@ -113,41 +115,36 @@ class PDFProcessor:
         
         return str(md_path)
     
-    def _export_filtered_markdown(self, document) -> str:
+    def _remove_page_numbers(self, markdown_text: str) -> str:
         """
-        Export Markdown content while filtering out page headers and footers.
-        Uses Docling's native export but filters the document structure first.
+        Remove page numbers from markdown text using regex patterns.
+        Handles common page number formats found in PDFs.
         """
-        filtered_count = 0
+        import re
         
-        # Try a simpler approach: filter then let Docling export
-        # We'll create a filtered copy of the main content
-        try:
-            # First, try to use export_to_markdown with image_mode
-            # But we need to filter the document's content first
-            # Let's iterate and collect non-header/footer items
-            from docling_core.types.doc import DoclingDocument
-            
-            # Get all items and filter
-            filtered_items = []
-            for item in document.iterate_items():
-                if hasattr(item, 'label') and item.label in [DocItemLabel.PAGE_FOOTER, DocItemLabel.PAGE_HEADER]:
-                    logger.debug(f"过滤页眉/页脚: {str(item)[:50]}...")
-                    filtered_count += 1
-                else:
-                    filtered_items.append(item)
-            
-            logger.info(f"已过滤 {filtered_count} 个页眉/页脚元素")            
-            # If we filtered nothing or everything is filtered, fall back to original
-            if filtered_count == 0:
-                logger.info("No page headers/footers found, using original export")
-                return document.export_to_markdown(image_mode=ImageRefMode.REFERENCED)
-            
-            # Use the original export since filtering at item level didn't work as expected  
-            # This is a limitation - we'll export everything for now
-            logger.warning("Page filtering attempted but using full export to ensure content is not lost")
-            return document.export_to_markdown(image_mode=ImageRefMode.REFERENCED)
-            
-        except Exception as e:
-            logger.error(f"Error in filtered export: {e}, falling back to standard export")
-            return document.export_to_markdown(image_mode=ImageRefMode.REFERENCED)
+        original_length = len(markdown_text)
+        
+        # Pattern 1: Paired digits on a line (e.g., "14 15", "16 17", "18 19")
+        # This is the format observed in user's PDF
+        markdown_text = re.sub(r'^\s*\d+\s+\d+\s*$', '', markdown_text, flags=re.MULTILINE)
+        
+        # Pattern 2: Single digit on a line (simple page numbers)
+        markdown_text = re.sub(r'^\s*\d+\s*$', '', markdown_text, flags=re.MULTILINE)
+        
+        # Pattern 3: "Page X" format
+        markdown_text = re.sub(r'^\s*Page\s+\d+\s*$', '', markdown_text, flags=re.MULTILINE | re.IGNORECASE)
+        
+        # Pattern 4: Dashed page numbers (e.g., "- 12 -", "-- 5 --")
+        markdown_text = re.sub(r'^\s*[-–—]+\s*\d+\s*[-–—]+\s*$', '', markdown_text, flags=re.MULTILINE)
+        
+        # Pattern 5: Page numbers with separators (e.g., "| 12 |", "/ 12 /")
+        markdown_text = re.sub(r'^\s*[|/]\s*\d+\s*[|/]\s*$', '', markdown_text, flags=re.MULTILINE)
+        
+        # Clean up excessive blank lines (more than 2 consecutive newlines)
+        markdown_text = re.sub(r'\n{3,}', '\n\n', markdown_text)
+        
+        removed_chars = original_length - len(markdown_text)
+        if removed_chars > 0:
+            logger.info(f"Removed approximately {removed_chars} characters of page number content")
+        
+        return markdown_text
