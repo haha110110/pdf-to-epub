@@ -73,9 +73,9 @@ class PDFProcessor:
             image_filename = f"image_{i+1}.png"
             image_path = self.images_dir / image_filename
             
-            # Save
+            # Save - ImageRef has a pil_image property that returns the PIL Image
             with open(image_path, "wb") as f:
-                picture.image.save(f, format="PNG")
+                picture.image.pil_image.save(f, format="PNG")
             
             # Update the picture's internal reference to point to this relative path
             # This is a "hack" but often necessary if the library doesn't auto-save to disk during export
