@@ -11,6 +11,8 @@ services:
       - ./data:/app/data
       # Persist models to host so we don't redownload on rebuild
       - ./models:/root/.cache
+      # Mount backend code for hot-reload (no rebuild needed)
+      - ./backend/app:/app/app
     environment:
       - HF_ENDPOINT=https://hf-mirror.com
       - HTTP_PROXY=http://127.0.0.1:10809
