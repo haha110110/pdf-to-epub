@@ -6,15 +6,16 @@ from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.backend.pypdfium2_backend import PyPdfiumDocumentBackend
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
-from docling_core.types.doc import ImageRefMode
+from docling_core.types.doc import ImageRefMode, DocItemLabel
 
 logger = logging.getLogger(__name__)
 
 class PDFProcessor:
-    def __init__(self, pdf_path: str, output_dir: str):
+    def __init__(self, pdf_path: str, output_dir: str, filter_page_numbers: bool = True):
         self.pdf_path = Path(pdf_path)
         self.output_dir = Path(output_dir)
         self.images_dir = self.output_dir / "images"
+        self.filter_page_numbers = filter_page_numbers
         
     def process(self) -> str:
         """
@@ -83,10 +84,13 @@ class PDFProcessor:
             # Let's rely on the fact that `docling` is smart enough if we don't mess with it?
             # No, safer to just save them. 
         
-        # To ensure the Markdown links point to the right place, we use the `image_mode`
-        md_content = conv_result.document.export_to_markdown(
-            image_mode=ImageRefMode.REFERENCED
-        )
+        # Export Markdown with optional page number filtering
+        if self.filter_page_numbers:
+            md_content = self._export_filtered_markdown(conv_result.document)
+        else:
+            md_content = conv_result.document.export_to_markdown(
+                image_mode=ImageRefMode.REFERENCED
+            )
         
         # Docling output usually looks like `![Image](image_1.png)` or similar defaults.
         # We might need to post-process the markdown if the paths don't match our `images/` folder.
@@ -108,3 +112,45 @@ class PDFProcessor:
         logger.info(f"Markdown content saved to {md_path}")
         
         return str(md_path)
+    
+    def _export_filtered_markdown(self, document) -> str:
+        """
+        Export Markdown content while filtering out page headers and footers.
+        """
+        from io import StringIO
+        
+        filtered_content = StringIO()
+        filtered_count = 0
+        
+        # Iterate through all document items
+        for item in document.iterate_items():
+            # Check if item has a label attribute and if it's a page header/footer
+            if hasattr(item, 'label') and item.label in [DocItemLabel.PAGE_FOOTER, DocItemLabel.PAGE_HEADER]:
+                # Log what we're filtering for debugging
+                item_text = ""
+                if hasattr(item, 'text'):
+                    item_text = item.text[:50] if len(item.text) > 50 else item.text
+                elif hasattr(item, 'export_to_markdown'):
+                    try:
+                        item_text = item.export_to_markdown()[:50]
+                    except:
+                        item_text = "N/A"
+                
+                logger.debug(f"过滤页眉/页脚: {item_text}...")
+                filtered_count += 1
+                continue
+            
+            # Export non-filtered items to markdown
+            if hasattr(item, 'export_to_markdown'):
+                try:
+                    filtered_content.write(item.export_to_markdown())
+                    filtered_content.write("\n")
+                except Exception as e:
+                    logger.warning(f"Failed to export item: {e}")
+        
+        logger.info(f"已过滤 {filtered_count} 个页眉/页脚元素")
+        
+        result = filtered_content.getvalue()
+        filtered_content.close()
+        
+        return result
