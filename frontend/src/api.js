@@ -22,6 +22,7 @@ export const saveContent = (projectId, content) => api.put(`/projects/${projectI
 export const buildEpub = (projectId) => api.post(`/projects/${projectId}/build`);
 
 export const getDownloadUrl = (projectId) => `/api/projects/${projectId}/download`;
+export const getDocxDownloadUrl = (projectId) => `/api/projects/${projectId}/download/docx`;
 export const getSourcePackageUrl = (projectId) => `/api/projects/${projectId}/package`;
 
 export default api;

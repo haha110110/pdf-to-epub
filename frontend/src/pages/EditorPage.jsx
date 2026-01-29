@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { getContent, saveContent, getStatus, buildEpub, getDownloadUrl, getSourcePackageUrl } from '../api';
+import { getContent, saveContent, getStatus, buildEpub, getDownloadUrl, getDocxDownloadUrl, getSourcePackageUrl } from '../api';
 import EditorWrapper from '../components/EditorWrapper';
-import { Save, Download, FileDown, BookOpen, Loader2, ArrowLeft } from 'lucide-react';
+import { Save, Download, FileDown, BookOpen, Loader2, ArrowLeft, FileText } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const EditorPage = () => {
@@ -104,9 +104,18 @@ const EditorPage = () => {
                             className="flex items-center gap-2 px-4 py-2 text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100"
                         >
                             <Download className="w-4 h-4" />
-                            Download EPUB
+                            EPUB
                         </a>
                     )}
+
+                    <a
+                        href={getDocxDownloadUrl(projectId)}
+                        className="flex items-center gap-2 px-4 py-2 text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100"
+                        title="Download as Word Document"
+                    >
+                        <FileText className="w-4 h-4" />
+                        Word
+                    </a>
 
                     <a
                         href={getSourcePackageUrl(projectId)}

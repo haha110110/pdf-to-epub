@@ -1,6 +1,9 @@
 fastapi
 uvicorn
-pymupdf
+docling
+
+pypdfium2
 Pillow
 python-multipart
 pypandoc
+python-docx

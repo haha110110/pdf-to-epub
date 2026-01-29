@@ -269,3 +269,35 @@ def download_package(project_id: str):
     # That's acceptable.
     
     return FileResponse(zip_path, filename=f"source_{project_id[:8]}.zip", media_type="application/zip")
+
+@router.get("/projects/{project_id}/download/docx")
+def download_docx(project_id: str):
+    """
+    Convert Content to Docx and download.
+    Uses Pandoc.
+    """
+    project_path = os.path.join(DATA_DIR, project_id)
+    md_path = os.path.join(project_path, "content.md")
+    docx_path = os.path.join(project_path, "output.docx")
+    
+    if not os.path.exists(md_path):
+        raise HTTPException(status_code=404, detail="Content not found. Please process PDF first.")
+        
+    try:
+        import pypandoc
+        # Convert MD to DOCX
+        # Note: We use reference-doc if we had one, but default is fine.
+        pypandoc.convert_file(
+            md_path, 
+            'docx', 
+            outputfile=docx_path,
+            extra_args=['--toc', f'--resource-path={project_path}']
+        )
+    except ImportError:
+         logger.error("pypandoc not installed")
+         raise HTTPException(status_code=500, detail="Server missing pypandoc")
+    except Exception as e:
+        logger.error(f"Docx conversion failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Conversion failed: {str(e)}")
+        
+    return FileResponse(docx_path, filename=f"document_{project_id[:8]}.docx", media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")

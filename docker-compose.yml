@@ -6,10 +6,16 @@ services:
       context: ./backend
       network: host
     container_name: pdf_epub_backend
+    network_mode: "host"
     volumes:
       - ./data:/app/data
-    ports:
-      - "8000:8000"
+      # Persist models to host so we don't redownload on rebuild
+      - ./models:/root/.cache
+    environment:
+      - HF_ENDPOINT=https://hf-mirror.com
+      - HTTP_PROXY=http://127.0.0.1:10809
+      - HTTPS_PROXY=http://127.0.0.1:10809
+      - NO_PROXY=localhost,127.0.0.1
     restart: unless-stopped
 
   frontend:
@@ -19,6 +25,8 @@ services:
     container_name: pdf_epub_frontend
     ports:
       - "9527:80"
+    extra_hosts:
+      - "backend:host-gateway"
     depends_on:
       - backend
     restart: unless-stopped
